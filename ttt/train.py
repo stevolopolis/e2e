@@ -49,6 +49,7 @@ def _make_train_iterator(cfg: Config, model_cfg, data_sharding: jax.sharding.Sha
             seed=cfg.training.data_seed,
             global_batch_size=cfg.training.global_batch_size,
             repeat=True,
+            shuffle=True, #False,
             bos_token_id=model_cfg.bos_token_id,
             eos_token_id=model_cfg.eos_token_id,
         )
@@ -70,9 +71,18 @@ def _make_train_iterator(cfg: Config, model_cfg, data_sharding: jax.sharding.Sha
         return tree_rearrange(batch, "(data_parallel batch) ... -> data_parallel batch ...", data_parallel=n_data_parallel)
 
     train_iter_ds = train_ds.to_iter_dataset(
-        grain.ReadOptions(num_threads=cfg.training.loader_workers, prefetch_buffer_size=500),
+        grain.ReadOptions(num_threads=cfg.training.loader_workers, prefetch_buffer_size=10000),
     )
     return iter(train_iter_ds), to_sharded_batch
+
+
+def _reshard_like_tree[T](tree: T, target_tree: T) -> T:
+    def _reshard_leaf(x, target):
+        if isinstance(x, jax.Array) and isinstance(target, jax.Array) and x.sharding != target.sharding:
+            return jax.device_put(jax.device_get(x), target.sharding)
+        return x
+
+    return jax.tree.map(_reshard_leaf, tree, target_tree, is_leaf=lambda x: x is None)
 
 
 def _main(cfg: Config) -> None:
@@ -104,7 +114,7 @@ def _main(cfg: Config) -> None:
         exp_name=cfg.training.exp_name,
         load_part=cfg.training.load_part,
         log_dir=log_dir,
-        wandb_key=cfg.training.wandb_key,
+        # wandb_key=cfg.training.wandb_key,
         logging_process=0,
         config=cfg_dict,
         enabled=cfg.training.log_wandb,
@@ -119,7 +129,8 @@ def _main(cfg: Config) -> None:
 
     model_sharding = ModelSharding(cfg)
     mesh = model_sharding.mesh
-    data_sharding = jax.NamedSharding(mesh, P("data"))
+    # Debug mode: disable data-axis sharding for input batches.
+    data_sharding = jax.NamedSharding(mesh, P())
     cfg.model.seq_len = cfg.training.seq_length
 
     train_ds_iter, to_sharded_batch = _make_train_iterator(cfg, model_cfg, data_sharding, n_data_parallel)
@@ -169,7 +180,7 @@ def _main(cfg: Config) -> None:
 
         def load_model_weights(model: MetaModel, out_state) -> MetaModel:
             model_loaded = unify_dict_with_eqx_module(out_state["model_weights"], model)[0]
-            return model_loaded
+            return _reshard_like_tree(model_loaded, model)
 
         master_log(logger, "Restoring model weights")
         model, state = create_sharded_model_and_state()
@@ -183,9 +194,9 @@ def _main(cfg: Config) -> None:
         else:  # Restore optimizer state
 
             def create_opt_state_with_loaded_weights(model: MetaModel, out_state) -> OptState:
-                opt_state = create_stepped_opt_state(model)
-                opt_state = unify_dict_with_eqx_module(out_state["opt_state"], opt_state)[0]
-                return opt_state
+                opt_state_template = create_stepped_opt_state(model)
+                opt_state_loaded = unify_dict_with_eqx_module(out_state["opt_state"], opt_state_template)[0]
+                return _reshard_like_tree(opt_state_loaded, opt_state_template)
 
             master_log(logger, "Restoring optimizer state")
             opt_state = create_opt_state_with_loaded_weights(model, out_state)
@@ -221,7 +232,7 @@ def _main(cfg: Config) -> None:
 
     with mesh:
         if cfg.training.eval_mode or start_step == total_steps:
-            state = state.set(model.step_index, jnp.array(jnp.iinfo(jnp.int32).max - 100, dtype=jnp.int32))
+            state = state.set(model.step_index, jax.device_put(jnp.asarray(jnp.iinfo(jnp.int32).max - 100, dtype=jnp.int32), state.get(model.step_index).sharding))
             evaluator.eval_fn(model, state, start_step)
             jax.experimental.multihost_utils.sync_global_devices("eval finished")
             return
@@ -234,7 +245,7 @@ def _main(cfg: Config) -> None:
 
             batch = to_sharded_batch(next(train_ds_iter))
 
-            state = state.set(model.step_index, jnp.array(step, dtype=jnp.int32))
+            state = state.set(model.step_index, jax.device_put(jnp.asarray(step, dtype=jnp.int32), state.get(model.step_index).sharding))
             model, opt_state, loss, metrics = train_on_sequence(state, model, opt_state, batch, cfg)
             loss_ce = metrics[M.loss].mean()
 
