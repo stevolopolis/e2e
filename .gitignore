@@ -5,3 +5,6 @@ wandb
 outputs
 multirun
 experiments
+checkpoints
+etc
+build
