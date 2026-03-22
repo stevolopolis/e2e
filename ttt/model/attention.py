@@ -14,6 +14,12 @@ from ttt.model.data import Batch
 from ttt.utils.jax_utils import get_float_dtype_by_name, maybe_double_remat, promote_dtype, tree_rearrange
 
 
+def _apply_sharding_constraint(x: jax.Array, _spec: P) -> jax.Array:
+    # Newer JAX versions reject with_sharding_constraint on explicit mesh axes.
+    # Keep this as a no-op while sharding constraints are disabled for debugging.
+    return x
+
+
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype: jnp.dtype = jnp.float32) -> jnp.ndarray:
     freqs = 1.0 / (theta ** (jnp.arange(0, dim, 2)[: (dim // 2)].astype(dtype) / dim))
     t = jnp.arange(end)
@@ -176,14 +182,14 @@ class AttentionBase(eqx.Module):
             raise ValueError("Not implemented")
 
         if self.config.force_flash:
-            xq = jax.lax.with_sharding_constraint(xq, P(None, "state", None))
-            xk = jax.lax.with_sharding_constraint(xk, P(None, "state", None))
-            xv = jax.lax.with_sharding_constraint(xv, P(None, "state", None))
+            xq = _apply_sharding_constraint(xq, P(None, "state", None))
+            xk = _apply_sharding_constraint(xk, P(None, "state", None))
+            xv = _apply_sharding_constraint(xv, P(None, "state", None))
 
         attn_output = jax.nn.dot_product_attention(xq, xk, xv, mask=attention_mask, implementation="cudnn" if self.config.force_flash else None)
 
         if self.config.force_flash:
-            attn_output = jax.lax.with_sharding_constraint(attn_output, P(None, "state", None))
+            attn_output = _apply_sharding_constraint(attn_output, P(None, "state", None))
 
         attn_output = self._merge_heads(attn_output)
 
@@ -207,14 +213,14 @@ class Attention(AttentionBase):
         xq, xk, xv = self.get_attention_input(hidden_states, position_ids=jnp.arange(seq.shape[0]) if seq.position_ids is None else seq.position_ids)
 
         if self.config.force_flash or is_prefix:
-            xq = jax.lax.with_sharding_constraint(xq, P(None, "state", None))
-            xk = jax.lax.with_sharding_constraint(xk, P(None, "state", None))
-            xv = jax.lax.with_sharding_constraint(xv, P(None, "state", None))
+            xq = _apply_sharding_constraint(xq, P(None, "state", None))
+            xk = _apply_sharding_constraint(xk, P(None, "state", None))
+            xv = _apply_sharding_constraint(xv, P(None, "state", None))
 
         attn_output = jax.nn.dot_product_attention(xq, xk, xv, is_causal=True, implementation="cudnn" if (self.config.force_flash or is_prefix) else None)
 
         if self.config.force_flash or is_prefix:
-            attn_output = jax.lax.with_sharding_constraint(attn_output, P(None, "state", None))
+            attn_output = _apply_sharding_constraint(attn_output, P(None, "state", None))
 
         attn_output = self._merge_heads(attn_output)
 
@@ -237,9 +243,9 @@ class SWAFull(Attention):
         xq, xk, xv = self.get_attention_input(hidden_states, position_ids=jnp.arange(seq.shape[0]) if seq.position_ids is None else seq.position_ids)
 
         if self.config.force_flash or is_prefix:
-            xq = jax.lax.with_sharding_constraint(xq, P(None, "state", None))
-            xk = jax.lax.with_sharding_constraint(xk, P(None, "state", None))
-            xv = jax.lax.with_sharding_constraint(xv, P(None, "state", None))
+            xq = _apply_sharding_constraint(xq, P(None, "state", None))
+            xk = _apply_sharding_constraint(xk, P(None, "state", None))
+            xv = _apply_sharding_constraint(xv, P(None, "state", None))
 
         attn_output = jax.nn.dot_product_attention(
             xq,
@@ -251,7 +257,7 @@ class SWAFull(Attention):
         )
 
         if self.config.force_flash or is_prefix:
-            attn_output = jax.lax.with_sharding_constraint(attn_output, P(None, "state", None))
+            attn_output = _apply_sharding_constraint(attn_output, P(None, "state", None))
 
         attn_output = self._merge_heads(attn_output)
 
@@ -305,13 +311,13 @@ class SWA(AttentionBase):
     ):
         xq, xk, xv = self.get_attention_input(hidden_states, position_ids=jnp.arange(seq.shape[0]) if seq.position_ids is None else seq.position_ids)
 
-        xq = jax.lax.with_sharding_constraint(xq, P(None, "state", None))
-        xk = jax.lax.with_sharding_constraint(xk, P(None, "state", None))
-        xv = jax.lax.with_sharding_constraint(xv, P(None, "state", None))
+        xq = _apply_sharding_constraint(xq, P(None, "state", None))
+        xk = _apply_sharding_constraint(xk, P(None, "state", None))
+        xv = _apply_sharding_constraint(xv, P(None, "state", None))
 
         attn_output = jax.nn.dot_product_attention(xq, xk, xv, is_causal=True, local_window_size=(self.window_size - 1, 0), implementation="cudnn")
 
-        attn_output = jax.lax.with_sharding_constraint(attn_output, P(None, "state", None))
+        attn_output = _apply_sharding_constraint(attn_output, P(None, "state", None))
 
         attn_output = self._merge_heads(attn_output)
 

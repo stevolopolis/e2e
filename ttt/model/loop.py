@@ -68,7 +68,7 @@ class Evaluator:
                 global_batch_size=global_batch_size,
                 seed=0,
                 repeat=False,
-                shuffle=False,
+                shuffle=True, #False,
                 bos_token_id=config.model.bos_token_id,
                 eos_token_id=config.model.eos_token_id,
             )
@@ -100,7 +100,10 @@ class Evaluator:
             loader_key = path[0].key
 
             results = []
-            for batch in tqdm(batch_loader, desc=f"Evaluating on sequence {loader_key}", total=len(ds), disable=pid != 0):
+            for i, batch in enumerate(tqdm(batch_loader, desc=f"Evaluating on sequence {loader_key}", total=len(ds), disable=pid != 0)):
+                # Debug mode: break after 10 batches
+                if i == 10: 
+                    break
                 result = eval_step_fn(model, batch, state)
                 results.append(result)
 
@@ -123,6 +126,7 @@ class Evaluator:
                 else:
                     # Log to wandb and cache for other metrics
                     save_dir = self.log_dir / f"{eval_name}_{metric_name}.npy"
+                    print(metric_name, metric.shape)
                     if metric_name == M.token_nll_loss:
                         self.wandb_logger.log_token_nll_loss(metric, step, eval_name)
                     np.save(save_dir, metric)

@@ -14,7 +14,12 @@ T = TypeVar("T", bound=PyTree)
 
 def shard_fn[T: PyTree](tree: T, mesh: jax.sharding.Mesh, where_spec_pairs: list[tuple[Callable[[MetaModel], tuple[Any, ...]], P]]) -> T:
     for where, spec in where_spec_pairs:
-        tree = eqx.tree_at(where, tree, replace_fn=lambda x: jax.lax.with_sharding_constraint(x, jax.NamedSharding(mesh, spec)), is_leaf=lambda x: x is None)
+        sharding = jax.NamedSharding(mesh, spec)
+
+        def _apply_sharding(x):
+            return jax.sharding.reshard(x, sharding)
+
+        tree = eqx.tree_at(where, tree, replace_fn=_apply_sharding, is_leaf=lambda x: x is None)
     return tree
 
 
@@ -89,4 +94,4 @@ class ModelSharding:
                 ]
             )
 
-        return shard_fn(model_params, self.mesh, shard_cfg)
+        return model_params #shard_fn(model_params, self.mesh, shard_cfg)

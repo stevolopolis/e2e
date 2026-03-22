@@ -274,7 +274,7 @@ def eval_shape_and_sharding(f, *args, **kwargs):
     sharding = f_jit.lower(*args, **kwargs).compile().output_shardings
 
     def add_sharding(shapes, sharding):
-        shapes.sharding = sharding
+        # shapes.sharding = sharding
         return shapes
 
     return jax.tree.map(add_sharding, shapes, sharding)
