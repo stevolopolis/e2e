@@ -6,8 +6,8 @@ defaults:
 
 deploy_paths:
   data:
-    dclm_filter_8k: ???
-    books3:  ???
+    dclm_filter_8k: /scratch/sl12886/data2/llama3-dclm-filter-8k/llama3-dclm-filter-8k/data.zarr/
+    books3:  /scratch/sl12886/data2/llama3-books3/llama3-books3/data.zarr/
   checkpoint: ${training.checkpoint_path}
 
 # Args found here: https://hydra.cc/docs/plugins/submitit_launcher/
@@ -16,16 +16,24 @@ hydra:
   mode: MULTIRUN
   launcher:
     name: ttt_e2e_multi_node  # Can be removed to let hydra choose ${hydra.job.name}
-    partition: ???
+    account: torch_pr_36_mren
     tasks_per_node: 1
-    cpus_per_task: 100
-    nodes: ???
+    cpus_per_task: 16
+    nodes: 1
+    mem_gb: 64
+    gres: gpu:1
+    constraint: h200
     signal_delay_s: 300
     max_num_timeout: 50
-    timeout_min: 3840
+    timeout_min: 30
     setup:
-      - "srun --export=UV_PROJECT_ENVIRONMENT=/tmp/ubuntu/uvenvs/ttt-e2e,UV_CACHE_DIR=/tmp/ubuntu/.cache/uv,UV_PYTHON_BIN_DIR=/tmp/ubuntu/.cache/uv_bin,UV_PYTHON_INSTALL_DIR=/tmp/ubuntu/.cache/uv_python /remote/bin/uv sync --exact --quiet"
-    slurm_python: "/tmp/ubuntu/uvenvs/ttt-e2e/bin/python"
+      - "module purge"
+      - "module load 'anaconda3/2025.06'"
+      - "source /share/apps/anaconda3/2025.06/etc/profile.d/conda.sh"
+      - "export PATH_TO_ENV=/scratch/sl12886/ttt/e2e_venv"
+      - "source activate $PATH_TO_ENV"
+      - "export PATH=$PATH_TO_ENV/bin:$PATH"
+    slurm_python: "/scratch/sl12886/ttt/e2e_venv/bin/python"
   job_logging:
     handlers:
       file:
