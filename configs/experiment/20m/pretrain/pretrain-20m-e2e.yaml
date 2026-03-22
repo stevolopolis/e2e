@@ -1,0 +1,26 @@
+# @package _global_
+defaults:
+  - override /training: 20m/pretrain-8K
+  - override /model: 20m
+  - _self_
+
+training:
+  exp_name: pretrain-20m-e2e-4
+  train_mode: meta
+  spec_inner: ["language_model.**.suffix_blocks.feed_forward_prime.**"]
+  ilr_init: 0.1
+  optimizer_inner:
+    optimizer_type: sgd
+    lr: 1
+    clip_gradient: 1.0
+
+model:
+  seq_modeling_block: SWA
+  force_flash: False
+  unroll_block_scan: True
+  mini_batch_size: 32
+  sliding_window_size: 32
+  rope_theta: 500000
+  prime: True
+  suffix_len: 3
+  intermediate_size: 256
