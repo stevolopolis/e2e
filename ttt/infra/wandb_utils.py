@@ -10,6 +10,8 @@ from hydra.core.hydra_config import HydraConfig
 from ttt.config import TrainingConfig
 from ttt.utils.jax_utils import master_log
 
+import matplotlib.pyplot as plt
+
 LoadPart = TrainingConfig.LoadPart
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -27,10 +29,10 @@ class WandbLogger:
         exp_name: str,
         load_part: LoadPart,
         log_dir: Path,
-        wandb_key: str,
         logging_process: int,
         config: dict = None,
         enabled: bool = True,
+        wandb_key: str = None,
     ):
         """
         Initialize logger. No-op if calling process is not master.
@@ -51,15 +53,15 @@ class WandbLogger:
 
         # Settings for wandb.init()
         self.wandb_settings = Settings(
-            api_key=wandb_key,
+            # api_key=wandb_key,
             entity=self.entity,
             project=self.project,
         )
 
         if self.is_master:
             # Pass API key directly to Api()
-            wandb.login(key=wandb_key)
-            api = wandb.Api(api_key=wandb_key)
+            wandb.login()
+            api = wandb.Api()
             runs = api.runs(f"{self.entity}/{self.project}", filters={"display_name": self.exp_name})
             num_existing = len(runs)
         else:
@@ -108,11 +110,18 @@ class WandbLogger:
 
         for r, row in enumerate(token_nll_loss):
             table = wandb.Table(data=[(step, i, tloss) for i, tloss in enumerate(row)], columns=["step", "token", "token_nll_loss"])
+            # pyplot
+            plt.figure()
+            plt.plot(row)
+            plt.xlabel("token")
+            plt.ylabel("token_nll_loss")
+            plt.title(f"Token NLL loss at step {step} (before gs {r})")
             self.log(
                 {
                     f"{k}/token_nll_loss(before gs {r})": wandb.plot.line(
                         table, "token", "token_nll_loss", "step", title=f"Token NLL loss at step {step} (before gs {r})", split_table=True
-                    )
+                    ),
+                    f"{k}/pyplot_token_nll_loss(after gs {r})": plt
                 },
                 step,
             )
